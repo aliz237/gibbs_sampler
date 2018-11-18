@@ -1,7 +1,7 @@
 #include "help.h"
 #include "headers.h"
 #include <chrono>
-//#include <boost/numeric/ublas/io.hpp>
+
 using namespace std :: chrono;
 using boost::math::binomial_coefficient;
 using std :: cout;
@@ -9,15 +9,15 @@ using std :: ofstream;
 
 //--------------------------------------------------------------------------------------------------------------
 //input data file paths
-const string RELS_FILE = "rels4.txt";
-const string ENTS_FILE = "ents3.txt";
-const string EVIDENCE_FILE = "evidence3.txt";
+const string RELS_FILE = "rels_file_cpp.txt";
+const string ENTS_FILE = "ents_file_cpp.txt";
+const string EVIDENCE_FILE = "evidence_file_cpp.txt";
 const string PROBS_FILE = "probs.txt";
 const string DIM_FILE = "dims.txt";
 
 //--------------------------------------------------------------------------------------------------------------
 
-constexpr Index BURN_IN = 20000;
+constexpr Index BURN_IN = 200000;
 //--------------------------------------------------------------------------------------------------------------
 
 const Relation rels (RELS_FILE, DIM_FILE);
@@ -57,7 +57,7 @@ Hashtab relsByMeshId = rels.group_by(R_MESHID);
 
 // this is to disambiguate the call to the overloaded log function
 double (*dlog)(double) = std :: log;
-
+int sgn (int x) { return ((x > 0) - (x < 0));}
 //--------------------------------------------------------------------------------------------------------------
 
 template<class V> void print(const V& v, std :: ostream& o=std :: cout)
@@ -127,11 +127,7 @@ void init()
 
   for (auto x : n0m)
     X[x] = 1;
-  // X[pc.idx] = X[ma.idx] = X[hyps.ind] = 0
 
-  ofstream fout("X.txt");
-  print(X, fout);
-  fout.close();
   //initialize to zero
   marg_prob_pc = Zmatrix2d(3,ents.pc_idx.size());
   marg_prob_m  = Zmatrix2d(2,ents.m_idx.size());
@@ -159,75 +155,63 @@ void update_pc_nodes(Index t)
   array<double,3> i_pc_log_ch_probs = {0.0, 0.0, 0.0};
 
   Index i_pc = ents.pc_idx[ t % pc_sz];
-  //cout << "i_pc=" << i_pc << "\n";
-  //cout << "ents.uid[i_pc]=" << ents.uid[i_pc] << "\n";
-  //cout <<"markov:\n";
   set<Index> i_pc_ch = rels.markov_blanket(relsBySrcUid.find(ents.uid[i_pc]), R_TRGUID);
-  //print(i_pc_ch);
-  //int cc;
-  //std :: cin >> cc;
-  
-    for (const Index& ch : i_pc_ch){
-      //cout << "ch:\n" << ch << "\n";
-      const vector<Index>& ch_net = relsByTrgUid.find(ch);
-      auto chi = rels.current_child_trg(ch_net[0]);
-      Index ch_val = X[ rels.current_child_trg(ch_net[0]) ]; //rels.at(ch_net.at(0)+R_TRGIDX));
-      //cout<<"ch_val:\n" << ch_val <<"\n";
-      vector<Index> ch_net_app = applicable_edges(ch_net);
-      //cout <<"ch_net_app:\n";
-      //if(ch_net_app.size()) print(ch_net_app); else cout <<"empty\n";
-      if ( ch_net_app.size() == 0 )
-	{
-	  double ch_p = log (comp_ch_p(0, 0, prb.pa, ch_val));
-	  i_pc_log_ch_probs += ch_p;
-	  //cout << "log(ch_p):" << ch_p << "\n";
-	  //cout<<"log_ch_probs:\n";
-	  //print(i_pc_log_ch_probs);
-	  continue;
-	}
     
-    set<Index> pa_ind_lab = rels.markov_blanket(ch_net_app, R_TYPE_SRCIND);
-    Index sz = pa_ind_lab.size();
-  
-    vector<Index> pa_idx(sz);
-    transform(pa_ind_lab, pa_idx, labs);
-      
-    vector<Index> pa_lab(sz);
-    transform(pa_ind_lab, pa_lab, sgn());
-
-    vector<Index> Val(sz);
-    for (Index i=0; i<sz; ++i) Val[i] = X[pa_idx[i]];
-
-    array<double,3> ch_p;
-    set<Index> ch_net_app_srcuid = rels.markov_blanket(ch_net_app, R_SRCUID);
-
-    if ( ! is_in(ents.uid[i_pc], ch_net_app_srcuid) )
+    for (const Index& ch : i_pc_ch)
       {
-          auto nmp = comp_nm_np(Val, pa_lab);
-          ch_p[0] = ch_p[1] = ch_p[2] = comp_ch_p(nmp.first, nmp.second, prb.pa, ch_val);
-      }
-
-    else
-      {
-	//find the current parent being updated
-	vector<Index> curr_parent_ind = find_idx_if(pa_idx, [i_pc](Index x){ return x == i_pc; });
 	
-	for (int k=-1; k<=1; ++k)
-	  {
-	    for (auto x : curr_parent_ind) Val[x] = k;
+	const vector<Index>& ch_net = relsByTrgUid.find(ch);
+	Index ch_val = X[ rels.current_child_trg(ch_net[0]) ]; 
 
-	    auto nmp = comp_nm_np(Val, pa_lab);
-	    //std :: cout <<nmp.first <<", " <<nmp.second <<"\n";
-	    ch_p[k+1] = comp_ch_p(nmp.first, nmp.second, prb.pa, ch_val);
+	vector<Index> ch_net_app = applicable_edges(ch_net);
+
+	if ( ch_net_app.size() == 0 )
+	  {
+	    double ch_p = log (comp_ch_p(0, 0, prb.pa, ch_val));
+	    i_pc_log_ch_probs += ch_p;
+	    continue;
 	  }
-      }
-    i_pc_log_ch_probs += apply(ch_p, dlog);    
+    
+	set<Index> pa_ind_lab = rels.markov_blanket(ch_net_app, R_TYPE_SRCIND);
+	Index sz = pa_ind_lab.size();
+  
+	vector<Index> pa_idx(sz);
+	transform(pa_ind_lab, pa_idx, labs);
+      
+	vector<Index> pa_lab(sz);
+	transform(pa_ind_lab, pa_lab, sgn);
+
+	vector<Index> Val(sz);
+	for (Index i=0; i<sz; ++i) Val[i] = X[pa_idx[i]];
+
+	array<double,3> ch_p;
+	set<Index> ch_net_app_srcuid = rels.markov_blanket(ch_net_app, R_SRCUID);
+
+	if ( ! is_in(ents.uid[i_pc], ch_net_app_srcuid) )
+	  {
+	    auto nmp = comp_nm_np(Val, pa_lab);
+	    ch_p[0] = ch_p[1] = ch_p[2] = comp_ch_p(nmp.first, nmp.second, prb.pa, ch_val);
+	  }
+
+	else
+	  {
+	    //find the current parent being updated
+	    vector<Index> curr_parent_ind = find_idx_if(pa_idx, equals(i_pc));
+	
+	    for (int k=-1; k<=1; ++k)
+	      {
+		for (auto x : curr_parent_ind) Val[x] = k;
+
+		auto nmp = comp_nm_np(Val, pa_lab);
+		ch_p[k+1] = comp_ch_p(nmp.first, nmp.second, prb.pa, ch_val);
+	      }
+	  }
+
+	i_pc_log_ch_probs += apply(ch_p, dlog);    
     
     } // end for ch
 
     array<double,3> i_pc_logX = i_pc_prior_probs + i_pc_log_ch_probs;
-
-
   
     std :: initializer_list<double> i_pc_probs =
       {
@@ -235,17 +219,11 @@ void update_pc_nodes(Index t)
 	1 / (1 + exp(i_pc_logX[0] - i_pc_logX[1]) + exp(i_pc_logX[2] - i_pc_logX[1])),
 	1 / (1 + exp(i_pc_logX[0] - i_pc_logX[2]) + exp(i_pc_logX[1] - i_pc_logX[2]))
       };
-      
 
-    //for (auto i : i_pc_probs) cout <<i <<"\t";
-    //cout <<"\n";  
-  
     //123 is the seed
     static sample i_pc_samp{123, -1};
   
     X[i_pc] = i_pc_samp(i_pc_probs);
-
-
 }
 //-----------------------------------------------------------------------------------------------------------------
 
@@ -265,7 +243,7 @@ void update_a_nodes(Index t){
     {
       Val[i] = X[ i_a_pa_idx[i] ];
     }
-  
+
   double z = 1 - pow( (1 - prb.w), count_if(Val, not_equals(0)) );
   array<double,2> i_a_pa_probs = {1-z, z};
   
@@ -290,7 +268,6 @@ void update_a_nodes(Index t){
   vector<Index> i_a_ch_net_without_a = applicable_edges(i_a_ch_net);
   
   // in each case compute Pr(Z | pa(Z))
-
   // probablility of child for different values of A
   array<double,2> i_a_ch_p;
 
@@ -301,6 +278,7 @@ void update_a_nodes(Index t){
       auto nmp = comp_nm_np(i_a_ch_net_without_a);
       i_a_ch_p[0] = comp_ch_p(nmp.first, nmp.second, prb.pc, i_a_ch_val);
     }
+
   else
     {
       i_a_ch_p[0] = comp_ch_p(0, 0, prb.pc, i_a_ch_val);
@@ -314,19 +292,13 @@ void update_a_nodes(Index t){
 
   // computint p(A=.) = pa.probs * ch.probs / sum(pa.probs * ch.probs)
   double weight = i_a_pa_probs[0]*i_a_ch_p[0] + i_a_pa_probs[1]*i_a_ch_p[1];
-  //double weight = inner_prod(i_a_pa_probs, i_a_ch_p);
+
   std :: initializer_list<double> i_a_probs =
     {
       i_a_pa_probs[0]*i_a_ch_p[0] / weight,
       i_a_pa_probs[1]*i_a_ch_p[1]/ weight
     };
 
-  
-      
-  //for(auto i : i_a_probs) cout << i << "\t";
-  //cout << "\n";
-
-  //update A
   static sample i_a_samp{123};
   X[i_a] = i_a_samp(i_a_probs);
 
@@ -382,11 +354,6 @@ void update_ctx_nodes(Index t)
       1 / (1 + exp(i_m_logX[0] - i_m_logX[1]))
     };
 
-
-  ofstream fout("i_m_probs.txt", std :: ofstream :: app);
-    print(i_m_probs, fout);
-    fout.close();
-
   
   static sample i_m_samp{123};
   X[i_m] = i_m_samp(i_m_probs);
@@ -412,11 +379,6 @@ void update_marginals_pc ()
   Index sz = ents.pc_idx.size();
   for (Index i=0; i<sz; ++i)
 
-    // In the sample data set, it seems more likely
-    // that X[v[i]] == 0, or 1 hence test for 0 or 1 first,
-    // rows of the matrix must match those of the R code
-    // i.e 1, 2, 0
-    
     if (X[ents.pc_idx[i]] == 0)
       ++marg_prob_pc(1,i);
     else if (X[ents.pc_idx[i]] == 1)
@@ -436,20 +398,32 @@ int main()
       auto t1 = steady_clock :: now();
       init();
       
-      Index e1 = BURN_IN + 1;
+      const Index e1 = BURN_IN + 1;
+      const Index N_ITR = 2000000;
+      const Index e2 = BURN_IN + N_ITR + 1;
 
+      std::cout << "Before Burn in ...\n";
       for(Index t=1; t != e1; ++t)
 	{
+
+	  if (t%50000 == 0)
+	    {
+	      std::cout <<"Iteration: " << t << " / " << N_ITR <<"\n";
+	    }
+
 	  update_pc_nodes (t);
 	  update_a_nodes  (t);
 	  update_ctx_nodes(t);
 	}
 
-      const Index N_ITR = 100000;
-      Index e2 = BURN_IN + N_ITR + 1;
-  
+      std::cout <<"After Burn in ...\n";
       for(Index t=e1; t != e2; ++t)
 	{
+	  if (t%100000 == 0)
+	    {
+	      std::cout <<"Iteration: " << t << " / " << N_ITR <<"\n";
+	    }
+	  
 	  update_pc_nodes (t);
 	  update_marginals_pc();
 	  
@@ -461,8 +435,10 @@ int main()
 	  
 	}
 
-      auto t2 = steady_clock :: now() - t1;
-      std :: cout << "\n" << duration_cast<seconds>(t2).count() << "(s)\n";
+      auto t2 = steady_clock::now() - t1;
+      std::cout << "\nSimulation Time:"
+		  <<  duration_cast<seconds>(t2).count()
+		  << "(s)\n";
 
       marg_prob_pc *= 1.0 / N_ITR;
       marg_prob_m  *= 1.0 / N_ITR;
@@ -472,11 +448,10 @@ int main()
       auto m_t = trans(marg_prob_m);
       auto a_t = trans(marg_prob_a);
 
-
       // save the results on disk
-      std :: ofstream o1("marg_prob_pc.txt");
-      std :: ofstream o2("marg_prob_m.txt");
-      std :: ofstream o3("marg_prob_a.txt");
+      std::ofstream o1("marg_prob_pc.txt");
+      std::ofstream o2("marg_prob_m.txt");
+      std::ofstream o3("marg_prob_a.txt");
 
       o1 << pc_t;
       o2 << m_t;
@@ -485,74 +460,13 @@ int main()
       o1.close();
       o2.close();
       o3.close();
-      
-      // compare with R results using matrix norms ||.||_1 and ||.||_2
-      
   
     }
   
   catch(Hash_error h)
     {
       std:: cout << h.name;
-      }
-  /*
-  
-  vector<Index> vals = {-1, 0, 1};
-  vector<Index> ten = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
-  
-  ofstream fout("test.txt");
-  for (auto ch_val : vals)
-    {
-      for (int nm = 1; nm <= 10; ++nm)
-	{
-	  for (int np = 1; np <= 10; ++np)
-	    {
-	      comp_prob_H(nm, np, prb.pa * ( 1 - abs(ch_val)) + prb.pc * abs(ch_val));
-	      fout << H_p[0] << "\t" <<  H_p[1] << "\t" << H_p[2] << "\t" <<  H_p[3] << "\n";
-	    }
-	}
     }
-  fout.close();
-  
-  fout.open("comb_test.txt");
-  for (auto ch_val : vals)
-    {
-      double pc = prb.pa * (1 - abs(ch_val)) + prb.pc * abs(ch_val);
-
-      for (int k = 1; k <=10; ++k)
-	{
-	  for (int l = 1; l <=10; ++l)
-	    {
-	      auto res = comb(10, 10, k, l, pc);
-	      fout <<res.first << "\t" << res.second << "\n";
-	    }
-	}
-    }
-      fout.close();  
-
-      fout.open("ch_p_test.txt");
-
-      for (int ch_val : vals)
-	{
-	  for (int k : ten)
-	    {
-	      for (int l : ten)
-		{
-		  fout << comp_ch_p (k, l, prb.pa, ch_val) << "\t";
-		  fout << comp_ch_p (k, l, prb.pc, ch_val) << "\n";
-		}
-	    }
-	}
-      
-      fout.close();
-      int val = 0;
-      comp_prob_H(1,1,prb.pa * (1-abs(val)) + prb.pc * abs(val));
-      //comp_prob_H(1,1,prb.pa);
-      int i = 0;
-      i = ++i << 2;
-      cout << H_p[0]*Z_p[i]+H_p[1]*Z_p[i+1] +H_p[2]*Z_p[i+2] + H_p[3]*Z_p[i+3]<<"\n" ;
-      cout << "Final:" << comp_ch_p(1,1,prb.pa, 0);
-  */
   
   return 0;
 }
@@ -576,8 +490,6 @@ std::pair<double, double> comb(int np, int nm, int k, int l, double pc){
 /*------------------------------------------------------------------------------------------
  * This function computes P(H | X)
  */
-
-
 
 void comp_prob_H(int nm, int np, double c){
 
@@ -646,62 +558,6 @@ double comp_ch_p(int nm, int np, double pac, int val){
   }
 
 /*------------------------------------------------------------------------------------------*/
-double comp_ch_p_2 (const vector<Index>& Val, const vector<Index>& pa_lab, int pac, int ch_val)
-{
-  // compute nm and np
-  auto res = comp_nm_np(Val, pa_lab);
-  int nm = res.first;
-  int np = res.second;
-  
-  // compute probH
-  double H[4] = {prb.pm, prb.pz, prb.pp, 0};
-  double c =  pac * (1-abs(ch_val)) + prb.pc * abs(ch_val);
-  int n = nm + np;
-
-  // if(n > 0) update H
-  if (n)
-    {
-      double pcn = pow(c, n);
-      double phm = pcn * prb.pm;
-      double ph0 = pcn * prb.pz;
-      double php = pcn * prb.pp;
-
-      if ( nm >= 1 )
-	phm += pow(c, np) - pcn;
-    
-      if ( np >= 1 )
-	php += pow(c, nm) - pcn;
-    
-      double B = 0.0;
-      double C = 0.0;
-    
-      if ( np >= 1 && nm >= 1 )
-	{
-	  for (int k=1; k<=np; ++k)
-	    {
-	      for (int l=1; l<=nm; ++l)
-		{
-		  auto x = comb(np, nm, k, l, c);
-		  B += x.first;
-		  C += x.second;
-		}
-	    }
-	}
-    
-      phm += C;
-      php += B;
-      double pha = (1 - ( pow(c, nm) + pow(c, np) - pcn )) - B - C;
-
-      H_p[0] = phm;
-      H_p[1] = ph0;
-      H_p[2] = php;
-      H_p[3] = pha;
-    }
-
-  int i = ++ch_val << 2;
-  return H_p[0] * Z_p[i] + H_p[1] * Z_p[i+1] + H_p[2] * Z_p[i+2] + H_p[3] * Z_p[i+3];
-  
-}
   
 std :: pair<Index, Index> comp_nm_np(const vector<Index>& Val, const vector<Index>& pa_lab)
 {
@@ -731,7 +587,7 @@ std::pair<Index, Index> comp_nm_np(const vector<Index>& n)
   vector<Index> Val(sz);
 
   transform(pa_ind_lab, pa_ind, labs);
-  transform(pa_ind_lab, pa_lab, sgn());
+  transform(pa_ind_lab, pa_lab, sgn);
   
 
   for (Index i=0; i<sz; ++i) Val[i] = X[pa_ind[i]];
@@ -739,5 +595,3 @@ std::pair<Index, Index> comp_nm_np(const vector<Index>& n)
   return comp_nm_np(Val, pa_lab);
 }
 /*------------------------------------------------------------------------------------------*/
-
-  

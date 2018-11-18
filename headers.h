@@ -36,16 +36,15 @@ struct Node
 
 class Hashtab
 {
-
-  public:
-  
   vector<vector<Node>> tab;
-  Index hash_map(Index i){ return i % tab.size(); }
   Index next_prime(Index);
   bool is_prime(Index);
+  Index hash_map(Index i);
   //Index binary_search(Index key, Index i);
-  unsigned int hash_map2( unsigned int a);    
-  Hashtab(Index sz) : tab {vector<vector<Node>>(next_prime(sz))} {}
+
+ public:
+  
+  Hashtab(Index sz);
   void insert(Index key, Index val);
   vector<Index> find (Index key);
   // don't need delete, rehash, etc ...(fixed sized dataset)
@@ -69,7 +68,7 @@ enum rel_idx : char
 
 class Relation
 {
-public:
+
   vector<Index> rels;
   
   // this holds the number of unique elements in
@@ -77,10 +76,8 @@ public:
   Index unique_key_dim[4]; 
   Index unique_dim (enum rel_idx) const;
   
-
-  //using Hashtab = vector<vector<Index>>;
-  //Index max_idx(enum rel_idx name);
-
+  public:
+  
   Relation (const string& relf, const string& dimf);
   Hashtab group_by (enum rel_idx) const;
   Index current_child_trg (Index i) const;
@@ -157,10 +154,10 @@ void init_matrix(const string& name, Matrix2s& m);
 /*
  * These are the ... */
 void init();
-std :: pair<double, double> comb(int np, int nm, int k, int l, double pc);
+std::pair<double, double> comb(int np, int nm, int k, int l, double pc);
 void comp_prob_H(int nm, int np, double c);
 void comp_pZ(int z);
 double comp_ch_p(int nm, int np, double pac, int val);
-std :: pair<Index, Index> comp_nm_np(const vector<Index>& Val, const vector<Index>& pa_lab);
+std::pair<Index, Index> comp_nm_np(const vector<Index>& Val, const vector<Index>& pa_lab);
 std::pair<Index, Index> comp_nm_np(const vector<Index>& n);
 #endif

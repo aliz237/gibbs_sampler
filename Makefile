@@ -1,5 +1,5 @@
-CXX = icpc
-CXXFLAGS = -std=c++14 -Wall -I ~/Downloads/boost_1_67_0/
+CXX = g++
+CXXFLAGS = -std=c++14 -O2 -Wall -I ~/Downloads/boost_1_68_0/
 main: fileio.o Relation.o Prob.o hash.o main.o
 	$(CXX) -o $@ $^ $(CXXFLAGS) 
 fileio.o: headers.h
