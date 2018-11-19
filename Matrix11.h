@@ -8,6 +8,21 @@
     (c) Bjarne Stroustrup, Texas A&M University. 
 
     Use as you like as long as you acknowledge the source.
+
+*/
+
+
+/*
+ * Changes made by A:
+ * The assignment operator does not allow assignment of matricies of 
+ * different sise. In fact sises and dimensions of Matrix objects were originaly
+ * decleared to be const. That has to be changed as it's more convinient for me
+ * to assign an already created matrix to an empty one. For example this is needed in
+ * update_marginals function object in main.cpp.
+ * I also need a default constructor for matrix<T,2>. 
+ *
+ * A clone method and a default constructor has been added 
+ * to the Matrix<T,2>.
 */
 
 #ifndef MATRIX_LIB
@@ -15,7 +30,7 @@
 
 #include<string>
 #include<algorithm>
-//#include<iostream>
+#include<iostream>
 
 namespace Numeric_lib {
 
@@ -116,14 +131,14 @@ template<class T> class Matrix_base {
     // Matrix_base does element-wise operations
 protected:
     T* elem;    // vector? no: we couldn't easily provide a vector for a slice
-    const Index sz;    
+    Index sz;    
     mutable bool owns;
     mutable bool xfer;
 public:
     Matrix_base(Index n) :elem(new T[n]()), sz(n), owns(true), xfer(false)
         // matrix of n elements (default initialized)
     {
-        // std::cerr << "new[" << n << "]->" << elem << "\n";
+      //std::cerr << "new[" << n << "]->" << elem << "\n";
     }
 
     Matrix_base(Index n, T* p) :elem(p), sz(n), owns(false), xfer(false)
@@ -358,8 +373,8 @@ public:
 //-----------------------------------------------------------------------------
 
 template<class T> class Matrix<T,2> : public Matrix_base<T> {
-    const Index d1;
-    const Index d2;
+     Index d1;
+     Index d2;
 
 protected:
     // for use by Row:
@@ -370,6 +385,7 @@ protected:
 
 public:
 
+ Matrix() : Matrix_base<T>(0), d1(0), d2(0) { }
     Matrix(Index n1, Index n2) : Matrix_base<T>(n1*n2), d1(n1), d2(n2) { }
 
     Matrix(Row<T,2>& a) : Matrix_base<T>(a.dim1()*a.dim2(),a.p), d1(a.dim1()), d2(a.dim2())
@@ -417,6 +433,36 @@ public:
         this->base_assign(a);
         return *this;
     }
+
+    void clone (const Matrix& a)
+      {
+	if (this->owns == false) error("Clone the owner instead.");
+	/* Potential Danger:
+	 *
+	 * auto X = A.xfer();
+	 * X.clone(B);
+	 * Clone deletes the memory A pointed to. 
+	 * (Danger): any access to the matrix A
+	 *
+	 * This shouldn't be a problem anyway: 
+	 * the code above violates the purpose of xfer(), 
+	 * which is to move A out of scope, which implies no more access to A.
+	 *
+   	 * Note:
+	 * A's destructor will not cause any problem, A.xfer() makes it a non-owner
+	 * and non-owners' memory is not deleted in ~Matrix().
+	 *
+	*/
+	
+	T* old = this->elem;
+	d1 = a.d1;
+	d2 = a.d2;
+	this->sz = d1*d2;
+	this->elem = new T[this->sz];
+	this->copy_elements(a);
+	delete[] old;
+		
+      }
 
     ~Matrix() { }
     
