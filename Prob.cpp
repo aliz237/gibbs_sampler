@@ -10,4 +10,5 @@ Prob :: Prob(const string& name)
     }
 
   fin >> pc >> pa >> hz >> alpha >> beta >> w >> cp >> pm >> pp >> pz;
+  fin.close();
 }

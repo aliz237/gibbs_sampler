@@ -14,10 +14,9 @@ const string ENTS_FILE = "ents_file_cpp.txt";
 const string EVIDENCE_FILE = "evidence_file_cpp.txt";
 const string PROBS_FILE = "probs.txt";
 const string DIM_FILE = "dims.txt";
-
 //--------------------------------------------------------------------------------------------------------------
-
-constexpr Index BURN_IN = 200000;
+constexpr Index N_ITR = 50000;
+constexpr Index BURN_IN = 10000;
 //--------------------------------------------------------------------------------------------------------------
 
 const Relation rels (RELS_FILE, DIM_FILE);
@@ -41,9 +40,6 @@ double H_p[4];
 Entry    ents;
 vector<Index> X;
 
-Matrix2d marg_prob_pc;
-Matrix2d marg_prob_m;
-Matrix2d marg_prob_a;
 
 //--------------------------------------------------------------------------------------------------------------
 
@@ -128,10 +124,7 @@ void init()
   for (auto x : n0m)
     X[x] = 1;
 
-  //initialize to zero
-  marg_prob_pc = Zmatrix2d(3,ents.pc_idx.size());
-  marg_prob_m  = Zmatrix2d(2,ents.m_idx.size());
-  marg_prob_a  = Zmatrix2d(2,ents.a_idx.size());
+
 }
 
 //--------------------------------------------------------------------------------------------------------------
@@ -362,30 +355,56 @@ void update_ctx_nodes(Index t)
 
 //-----------------------------------------------------------------------------------------------------------------
 
-void update_marginals_ma(Matrix2d& m, const vector<Index>& v)
+class ma_marginals
 {
-  Index sz = v.size();
   
-  for (Index i=0; i<sz; ++i)
-
-    X[v[i]] == 0 ? ++m(0,i) : ++m(1,i);
+protected:
+  Matrix2d m;
+  const vector<Index>& v;
   
-}
-//-----------------------------------------------------------------------------------------------------------------
+public:
+  ma_marginals (Index d1, const vector<Index>& idx) :
+    v{idx}
+  {
+    m = Zmatrix2d(d1, idx.size());
+  }
+  
+  void update()
+  {
+    for (Index i=0; i<m.size2(); ++i)
+      X[v[i]] == 0 ? ++m(0,i) : ++m(1,i);
+  }
 
-void update_marginals_pc ()
+  void write (const string& file)
+  {
+    std::ofstream fout(file);
+    Matrix2d tr = trans(m);
+    tr *= 1.0 / N_ITR;
+    fout << tr;
+    fout.close();
+  }
+};
+
+class pc_marginals : public ma_marginals
 {
+  
+public:
+  
+  pc_marginals (Index d1, const vector<Index>& idx) :
+    ma_marginals(d1,idx) {}
 
-  Index sz = ents.pc_idx.size();
-  for (Index i=0; i<sz; ++i)
+  void update()
+  {
+    for (Index i=0; i<m.size2(); ++i)
 
-    if (X[ents.pc_idx[i]] == 0)
-      ++marg_prob_pc(1,i);
-    else if (X[ents.pc_idx[i]] == 1)
-      ++marg_prob_pc(2,i);
-    else
-      ++marg_prob_pc(0,i);
-}
+      if (X[v[i]] == 0)
+	++m(1,i);
+      else if (X[v[i]] == 1)
+	++m(2,i);
+      else
+	++m(0,i);
+  }   
+};
 
 //-----------------------------------------------------------------------------------------------------------------
 
@@ -399,7 +418,6 @@ int main()
       init();
       
       const Index e1 = BURN_IN + 1;
-      const Index N_ITR = 2000000;
       const Index e2 = BURN_IN + N_ITR + 1;
 
       std::cout << "Before Burn in ...\n";
@@ -417,6 +435,12 @@ int main()
 	}
 
       std::cout <<"After Burn in ...\n";
+      // Marginal probabilities will be updated.
+      
+      ma_marginals marg_m(2,ents.m_idx);
+      ma_marginals marg_a(2,ents.a_idx);
+      pc_marginals marg_pc(3,ents.pc_idx);
+      
       for(Index t=e1; t != e2; ++t)
 	{
 	  if (t%100000 == 0)
@@ -425,13 +449,13 @@ int main()
 	    }
 	  
 	  update_pc_nodes (t);
-	  update_marginals_pc();
+	  marg_pc.update();
 	  
 	  update_a_nodes  (t);
-	  update_marginals_ma(marg_prob_a, ents.a_idx);
+	  marg_a.update();
 	  
 	  update_ctx_nodes(t);
-	  update_marginals_ma(marg_prob_m, ents.m_idx);
+	  marg_m.update();
 	  
 	}
 
@@ -440,26 +464,9 @@ int main()
 		  <<  duration_cast<seconds>(t2).count()
 		  << "(s)\n";
 
-      marg_prob_pc *= 1.0 / N_ITR;
-      marg_prob_m  *= 1.0 / N_ITR;
-      marg_prob_a  *= 1.0 / N_ITR;
-
-      auto pc_t = trans(marg_prob_pc);
-      auto m_t = trans(marg_prob_m);
-      auto a_t = trans(marg_prob_a);
-
-      // save the results on disk
-      std::ofstream o1("marg_prob_pc.txt");
-      std::ofstream o2("marg_prob_m.txt");
-      std::ofstream o3("marg_prob_a.txt");
-
-      o1 << pc_t;
-      o2 << m_t;
-      o3 << a_t;
-	
-      o1.close();
-      o2.close();
-      o3.close();
+      marg_pc.write("marg_prob_pc.txt");
+      marg_m.write("marg_prob_m.txt");
+      marg_a.write("marg_prob_a.txt");
   
     }
   
