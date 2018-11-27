@@ -1,3 +1,4 @@
 *.o
 *~
-mainmarg_prob_*
+*.txt
+./main

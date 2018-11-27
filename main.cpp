@@ -139,7 +139,52 @@ vector<Index> applicable_edges (const vector<Index>& net)
   return res;
 }
 //--------------------------------------------------------------------------------------------------------------
+template<int N, class F, class G> array<double, N> compute (const vector<Index>& pa_idx,
+							    Index ch, G g, F f)
+{
+  // requires f to be a functur with double operator ()(const vector<Index>&) const
+  // requires g to be a functur with int operator () (int) const
+
+  vector<Index> Val;
+  for (Index i : pa_idx) Val.push_back(X[i]);
+      
+  vector<Index> curr_parent_idx = find_idx_if(pa_idx, equals(ch));
+  array<double,N> ch_p;
   
+  for (int k=0; k<N; ++k)
+    {
+      for (auto x : curr_parent_idx)
+	Val[x] = g(k);
+	  
+      ch_p[k] = f(Val);
+    }
+  
+  return apply(ch_p, dlog);
+}
+    
+//--------------------------------------------------------------------------------------------------------------
+
+class pc_compute
+{
+  const Index ch_val;
+  const set<Index>& pa_idx_lab;
+
+public:
+  pc_compute(Index val, const set<Index>& s):
+    pa_idx_lab{s}, ch_val{val} {}
+
+  double operator() (const vector<Index>& val) const
+  {
+    vector<Index> pa_lab(pa_idx_lab.size());
+    transform(pa_idx_lab, pa_lab, sgn);
+
+    auto nmp = comp_nm_np(pa_lab, val);
+    return comp_ch_p(nmp.first, nmp.second, prb.pa, ch_val);
+  }
+};
+
+//--------------------------------------------------------------------------------------------------------------
+
 void update_pc_nodes(Index t)
 {
   static const Index pc_sz = ents.pc_idx.size();
@@ -150,73 +195,50 @@ void update_pc_nodes(Index t)
   Index i_pc = ents.pc_idx[ t % pc_sz];
   set<Index> i_pc_ch = rels.markov_blanket(relsBySrcUid.find(ents.uid[i_pc]), R_TRGUID);
     
-    for (const Index& ch : i_pc_ch)
-      {
+  for (Index ch : i_pc_ch)
+    {
 	
-	const vector<Index>& ch_net = relsByTrgUid.find(ch);
-	Index ch_val = X[ rels.current_child_trg(ch_net[0]) ]; 
+      const vector<Index>& ch_net = relsByTrgUid.find(ch);
+      Index ch_val = X[ rels.current_child_trg(ch_net[0]) ]; 
 
-	vector<Index> ch_net_app = applicable_edges(ch_net);
+      vector<Index> ch_net_app = applicable_edges(ch_net);
 
-	if ( ch_net_app.size() == 0 )
-	  {
-	    double ch_p = log (comp_ch_p(0, 0, prb.pa, ch_val));
-	    i_pc_log_ch_probs += ch_p;
-	    continue;
-	  }
-    
-	set<Index> pa_ind_lab = rels.markov_blanket(ch_net_app, R_TYPE_SRCIND);
-	Index sz = pa_ind_lab.size();
-  
-	vector<Index> pa_idx(sz);
-	transform(pa_ind_lab, pa_idx, labs);
-      
-	vector<Index> pa_lab(sz);
-	transform(pa_ind_lab, pa_lab, sgn);
+      if ( ch_net_app.size() == 0 )
+	{
+	  i_pc_log_ch_probs += log(comp_ch_p(0, 0, prb.pa, ch_val));
+	  continue;
+	}
 
-	vector<Index> Val(sz);
-	for (Index i=0; i<sz; ++i) Val[i] = X[pa_idx[i]];
+      if (!is_in(ents.uid[i_pc], rels.markov_blanket(ch_net_app, R_SRCUID)))
+	{
+	  auto nmp = comp_nm_np(ch_net_app);
+	  i_pc_log_ch_probs += log(comp_ch_p(nmp.first, nmp.second, prb.pa, ch_val));
+	}
 
-	array<double,3> ch_p;
-	set<Index> ch_net_app_srcuid = rels.markov_blanket(ch_net_app, R_SRCUID);
+      else
+	{
+	  set<Index> pa_idx_lab = rels.markov_blanket(ch_net_app, R_TYPE_SRCIND);
+	  vector<Index> pa_idx(pa_idx_lab.size());
+	  transform(pa_idx_lab, pa_idx, labs);
+	  // 3 new probabilites to be computed
+	  i_pc_log_ch_probs += compute<3>(pa_idx, i_pc, [](int k){return k-1;},
+					  pc_compute(ch_val, pa_idx_lab));
+	}
 
-	if ( ! is_in(ents.uid[i_pc], ch_net_app_srcuid) )
-	  {
-	    auto nmp = comp_nm_np(Val, pa_lab);
-	    ch_p[0] = ch_p[1] = ch_p[2] = comp_ch_p(nmp.first, nmp.second, prb.pa, ch_val);
-	  }
-
-	else
-	  {
-	    //find the current parent being updated
-	    vector<Index> curr_parent_ind = find_idx_if(pa_idx, equals(i_pc));
-	
-	    for (int k=-1; k<=1; ++k)
-	      {
-		for (auto x : curr_parent_ind) Val[x] = k;
-
-		auto nmp = comp_nm_np(Val, pa_lab);
-		ch_p[k+1] = comp_ch_p(nmp.first, nmp.second, prb.pa, ch_val);
-	      }
-	  }
-
-	i_pc_log_ch_probs += apply(ch_p, dlog);    
-    
     } // end for ch
-
-    array<double,3> i_pc_logX = i_pc_prior_probs + i_pc_log_ch_probs;
+	
+  array<double,3> i_pc_logX = i_pc_prior_probs + i_pc_log_ch_probs;
   
-    std :: initializer_list<double> i_pc_probs =
-      {
-	1 / (1 + exp(i_pc_logX[1] - i_pc_logX[0]) + exp(i_pc_logX[2] - i_pc_logX[0])),
-	1 / (1 + exp(i_pc_logX[0] - i_pc_logX[1]) + exp(i_pc_logX[2] - i_pc_logX[1])),
-	1 / (1 + exp(i_pc_logX[0] - i_pc_logX[2]) + exp(i_pc_logX[1] - i_pc_logX[2]))
-      };
+  std::initializer_list<double> i_pc_probs =
+    {
+      1 / (1 + exp(i_pc_logX[1] - i_pc_logX[0]) + exp(i_pc_logX[2] - i_pc_logX[0])),
+      1 / (1 + exp(i_pc_logX[0] - i_pc_logX[1]) + exp(i_pc_logX[2] - i_pc_logX[1])),
+      1 / (1 + exp(i_pc_logX[0] - i_pc_logX[2]) + exp(i_pc_logX[1] - i_pc_logX[2]))
+    };
 
-    //123 is the seed
-    static sample i_pc_samp{123, -1};
-  
-    X[i_pc] = i_pc_samp(i_pc_probs);
+  //123 is the seed
+  static sample i_pc_samp{123, -1};
+  X[i_pc] = i_pc_samp(i_pc_probs);
 }
 //-----------------------------------------------------------------------------------------------------------------
 
@@ -316,44 +338,32 @@ void update_ctx_nodes(Index t)
     {
       const vector<Index>& ch_net = relsByAppId.find(ch);
 
-      // value of the current child
       Index ch_val = X[ rels.current_child_app(ch_net[0]) ];
-    
+
       vector<Index> pa_idx = rels.get_idx(ch_net, R_MESHIND);
-      
-      vector<Index> Val;
-      for (Index i : pa_idx) Val.push_back(X[i]);
-
-      //curr_pa_idx = which(pa_idx = i_m);
-      vector<Index> curr_pa_idx = find_idx_if(pa_idx, equals(i_m));
-
-      array<double,2> ch_p;
-      
-      for (int k=0; k<=1; ++k)
-	{
-	  for (Index i : curr_pa_idx) Val[i] = k;
-	  double z = 1 - pow((1.0 - prb.w), count_if(Val, not_equals(0)));
-	  ch_p[k] = ch_val == 1 ? z : 1 - z;
-	}
-      
-      i_m_log_ch_probs += apply(ch_p, dlog);
+      // update 2 new probabilities
+      i_m_log_ch_probs += compute<2>(pa_idx, i_m, [](int i){return i;},
+				     [ch_val](const vector<Index>& Val)
+				     {
+				       double z = 1 - pow((1.0 - prb.w), count_if(Val, not_equals(0)));
+				       return ch_val == 1 ? z : 1 - z;
+				     });				     
     }
-
+    
   array<double,2> i_m_logX = i_m_prior_probs + i_m_log_ch_probs;
     
-  std :: initializer_list<double> i_m_probs =
+  std::initializer_list<double> i_m_probs =
     {
       1 / (1 + exp(i_m_logX[1] - i_m_logX[0])),
       1 / (1 + exp(i_m_logX[0] - i_m_logX[1]))
     };
-
   
   static sample i_m_samp{123};
   X[i_m] = i_m_samp(i_m_probs);
   
 }// update_ctx_nodes
 
-//-----------------------------------------------------------------------------------------------------------------
+//----------------------------------------------------------------------------------------------------------------
 
 class ma_marginals
 {
@@ -387,9 +397,8 @@ public:
 
 class pc_marginals : public ma_marginals
 {
-  
 public:
-  
+
   pc_marginals (Index d1, const vector<Index>& idx) :
     ma_marginals(d1,idx) {}
 
