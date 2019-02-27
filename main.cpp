@@ -22,17 +22,6 @@ constexpr Index BURN_IN = 10000;
 const Relation rels (RELS_FILE, DIM_FILE);
 const Prob     prb  (PROBS_FILE);
 
-const double Z_p[12] =
-  {
-    1 - 2 * prb.beta , prb.alpha         , prb.beta         , 1.0 / 3,
-    prb.beta         , 1 - 2 * prb.alpha , prb.beta         , 1.0 / 3,
-    prb.beta         , prb.alpha         , 1 - 2 * prb.beta , 1.0 / 3
-  };
-
-// this holds the computation of comp_prb_H and is used in comp_ch_p
-// not defining it globally here causes memory fragmentation
-// and slows the code dramatically
-double H_p[4];
 
 //--------------------------------------------------------------------------------------------------------------
 
@@ -114,7 +103,8 @@ void init()
   Col1s evid_uid(evid, 0);
   Col1s evid_type(evid, 1);
   
-  X = vector<Index>(ents.uid.size());
+
+  X.reserve(ents.uid.size());
   
   auto evid_idx = match(ents_uid, evid_uid);
 
@@ -123,8 +113,6 @@ void init()
 
   for (auto x : n0m)
     X[x] = 1;
-
-
 }
 
 //--------------------------------------------------------------------------------------------------------------
@@ -146,6 +134,7 @@ template<int N, class F, class G> array<double, N> compute (const vector<Index>&
   // requires g to be a functur with int operator () (int) const
 
   vector<Index> Val;
+  Val.reserve(pa_idx.size());
   for (Index i : pa_idx) Val.push_back(X[i]);
       
   vector<Index> curr_parent_idx = find_idx_if(pa_idx, equals(ch));
@@ -175,7 +164,8 @@ public:
 
   double operator() (const vector<Index>& val) const
   {
-    vector<Index> pa_lab(pa_idx_lab.size());
+    vector<Index> pa_lab;
+    pa_lab.reserve(pa_idx_lab.size());
     transform(pa_idx_lab, pa_lab, sgn);
 
     auto nmp = comp_nm_np(pa_lab, val);
@@ -218,7 +208,8 @@ void update_pc_nodes(Index t)
       else
 	{
 	  set<Index> pa_idx_lab = rels.markov_blanket(ch_net_app, R_TYPE_SRCIND);
-	  vector<Index> pa_idx(pa_idx_lab.size());
+	  vector<Index> pa_idx;
+	  pa_idx.reserve(pa_idx_lab.size());
 	  transform(pa_idx_lab, pa_idx, labs);
 	  // 3 new probabilites to be computed
 	  i_pc_log_ch_probs += compute<3>(pa_idx, i_pc, [](int k){return k-1;},
@@ -253,11 +244,11 @@ void update_a_nodes(Index t){
   vector<Index> i_a_pa_idx =  rels.get_idx(curr_app_net, R_MESHIND);
   
   //Val = X[i_a_pa_idx]
-  vector<Index> Val(i_a_pa_idx.size());
-  for (Index i=0; i<i_a_pa_idx.size(); ++i)
-    {
-      Val[i] = X[ i_a_pa_idx[i] ];
-    }
+  vector<Index> Val;
+  Val.reserve(i_a_pa_idx.size());
+  for (Index i : i_a_pa_idx) Val.push_back(X[i]);
+
+
 
   double z = 1 - pow( (1 - prb.w), count_if(Val, not_equals(0)) );
   array<double,2> i_a_pa_probs = {1-z, z};
@@ -331,10 +322,7 @@ void update_ctx_nodes(Index t)
   
   array<double,2> i_m_log_ch_probs = {0.0, 0.0};
 
-  set<Index> i_m_ch = rels.markov_blanket(relsByMeshId.find(ents.uid[i_m]), R_APPID);
-
-
-  for (Index ch : i_m_ch)
+  for (Index ch : rels.markov_blanket(relsByMeshId.find(ents.uid[i_m]), R_APPID))
     {
       const vector<Index>& ch_net = relsByAppId.find(ch);
 
@@ -507,55 +495,39 @@ std::pair<double, double> comb(int np, int nm, int k, int l, double pc){
  * This function computes P(H | X)
  */
 
-void comp_prob_H(int nm, int np, double c){
+array<double,4> comp_prob_H(int nm, int np, double c)
+{
 
-    int n = nm + np;
+  if (nm+np <= 0)
+    return array<double,4>{prb.pm, prb.pz, prb.pp, 0};
+  
+  double pcn = pow(c, nm+np);
+  array<double,4> H_p = {pcn*prb.pm, pcn*prb.pz, pcn*prb.pp, 0};
+
+  if (nm >= 1)
+    H_p[0] += pow(c, np) - pcn;
     
-    if ( n <= 0 )
-      {
-	H_p[0] = prb.pm;
-	H_p[1] = prb.pz;
-	H_p[2] = prb.pp;
-	H_p[3] = 0;
-	return;
+  if (np >= 1)
+    H_p[2] += pow(c, nm) - pcn;
+    
+  double B = 0.0;
+  double C = 0.0;
+  
+  if (np >= 1 && nm >= 1){
+    for (int k=1; k<=np; ++k){
+      for (int l=1; l<=nm; ++l){
+	auto x = comb(np, nm, k, l, c);
+	B += x.first;
+	C += x.second;
       }
-
-    double pcn = pow(c, n);
-    double phm = pcn * prb.pm;
-    double ph0 = pcn * prb.pz;
-    double php = pcn * prb.pp;
-
-    if ( nm >= 1 )
-      phm += pow(c, np) - pcn;
+    }
+  }
     
-    if ( np >= 1 )
-      php += pow(c, nm) - pcn;
-    
-    double B = 0.0;
-    double C = 0.0;
-    
-    if ( np >= 1 && nm >= 1 )
-      {
-	for (int k=1; k<=np; ++k)
-	  {
-	    for(int l=1; l<=nm; ++l)
-	      {
-		auto x = comb(np, nm, k, l, c);
-		B += x.first;
-		C += x.second;
-	      }
-	  }
-      }
+  H_p[0] += C;
+  H_p[2] += B;
+  H_p[3] = (1 - (pow(c, nm) + pow(c, np) - pcn)) - B - C;
 
-    
-    phm += C;
-    php += B;
-    double pha = (1 - ( pow(c, nm) + pow(c, np) - pcn )) - B - C;
-
-    H_p[0] = phm;
-    H_p[1] = ph0;
-    H_p[2] = php;
-    H_p[3] = pha;
+  return H_p;
 }
   
 
@@ -564,12 +536,18 @@ void comp_prob_H(int nm, int np, double c){
  */
 
 double comp_ch_p(int nm, int np, double pac, int val){
+  static const double Z_p[12] =
+    {
+      1 - 2 * prb.beta , prb.alpha         , prb.beta         , 1.0 / 3,
+      prb.beta         , 1 - 2 * prb.alpha , prb.beta         , 1.0 / 3,
+      prb.beta         , prb.alpha         , 1 - 2 * prb.beta , 1.0 / 3
+    };
  
-    comp_prob_H(nm, np, pac * (1-abs(val)) + prb.pc * abs(val));
-    //return  inner_prod(Z_p, H_p);
-    int i = ++val << 2;
-    return
-      H_p[0] * Z_p[i] + H_p[1] * Z_p[i+1] + H_p[2] * Z_p[i+2] + H_p[3] * Z_p[i+3];
+  array<double,4> H_p = comp_prob_H(nm, np, pac * (1-abs(val)) + prb.pc * abs(val));
+
+  int i = ++val << 2;
+  return
+    H_p[0] * Z_p[i] + H_p[1] * Z_p[i+1] + H_p[2] * Z_p[i+2] + H_p[3] * Z_p[i+3];
       
   }
 
@@ -577,13 +555,14 @@ double comp_ch_p(int nm, int np, double pac, int val){
   
 std :: pair<Index, Index> comp_nm_np(const vector<Index>& Val, const vector<Index>& pa_lab)
 {
-
   Index sz= Val.size();
-  vector<Index> pred_vals(sz);
+  
+  vector<Index> pred_vals;
+  pred_vals.reserve(sz);
 
   for (Index i=0; i<sz; ++i)
     pred_vals[i] = Val[i] * pa_lab[i];
-
+  
   std::pair<Index,Index> res(0,0);
   res.first  = count_if(pred_vals, equals(-1)); //nm
   res.second = count_if(pred_vals, equals(1)); //np
@@ -598,16 +577,19 @@ std::pair<Index, Index> comp_nm_np(const vector<Index>& n)
   const set<Index> pa_ind_lab = rels.markov_blanket(n, R_TYPE_SRCIND);
   auto sz = pa_ind_lab.size();
 
-  vector<Index> pa_ind(sz);
-  vector<Index> pa_lab(sz);
-  vector<Index> Val(sz);
+  vector<Index> pa_ind;
+  pa_ind.reserve(sz);
+  
+  vector<Index> pa_lab;
+  pa_lab.reserve(sz);
+  
+  vector<Index> Val;
+  Val.reserve(sz);
 
   transform(pa_ind_lab, pa_ind, labs);
   transform(pa_ind_lab, pa_lab, sgn);
   
-
-  for (Index i=0; i<sz; ++i) Val[i] = X[pa_ind[i]];
-
+  for (Index i : pa_ind) Val.push_back(X[i]);
   return comp_nm_np(Val, pa_lab);
 }
 /*------------------------------------------------------------------------------------------*/

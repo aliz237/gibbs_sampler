@@ -7,3 +7,6 @@ Relation.o: headers.h
 Prob.o: headers.h
 main.o: headers.h help.h
 hash.o: headers.h
+
+clean:
+	rm -f *.o
